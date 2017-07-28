@@ -1,3 +1,5 @@
+casper.options.waitTimeout = 20000;
+
 casper.test.begin('nodes.html', 2, function(test) {
   const URL = casper.cli.get('url');
   const username = casper.cli.get('username');
