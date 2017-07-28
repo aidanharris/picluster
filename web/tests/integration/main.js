@@ -8,7 +8,7 @@ casper.test.begin('main.html', 6, function(test) {
   casper.start(URL);
 
   casper.viewport(1920, 1080).then(function() {
-      const lib = require('../lib')(this);
+      const lib = require('../lib/index.js')(this);
 
       test.assertEquals(this.currentHTTPStatus, 200, "HTTP Status Code should be 200");
       test.assertEquals(this.getTitle(), 'PiCluster Web Console', "Title should equal 'PiCluster WebConsole'");
