@@ -8,6 +8,8 @@ casper.test.begin('main.html', 6, function(test) {
   casper.start(URL);
 
   casper.viewport(1920, 1080).then(function() {
+      const lib = require('../lib')(this);
+
       test.assertEquals(this.currentHTTPStatus, 200, "HTTP Status Code should be 200");
       test.assertEquals(this.getTitle(), 'PiCluster Web Console', "Title should equal 'PiCluster WebConsole'");
       var iframe = this.evaluate(function(username, password) {
@@ -26,11 +28,7 @@ casper.test.begin('main.html', 6, function(test) {
 
         test.assert(expected_jquery.indexOf(jquery) > -1, "jQuery should be " + expected_jquery);
 
-        this.evaluate(function(username, password) {
-          document.getElementById('user').value = username;
-          document.getElementById('password').value = password;
-          document.getElementById('myBtn').click();
-        }, username, password);
+        lib.doLogin(username, password);
 
         this.wait(1000, function() {
           var token = this.evaluate(function() {
