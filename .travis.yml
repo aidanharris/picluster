@@ -1,5 +1,9 @@
 language: node_js
 
+before_install:
+  - sudo apt-get -qq update
+  - sudo apt-get install -y parallel
+
 node_js:
   - "node"
 
@@ -11,7 +15,7 @@ script:
 - cd server;npm install; node server.js&
 - cd ../agent;npm install; node agent.js&
 - cd ../web;npm install; node webconsole.js&
-- sleep 2 && PATH="$PATH:$PWD/node_modules/.bin" ./node_modules/.bin/casperjs test tests/integration --verbose --log-level=info --fail-fast --engine=phantomjs --username=admin --password=admin --token=1234567890ABCDEFGHJKLMNOP --url=http://$IP:3003 --font-linux=fl-ubuntu-inverse
+- sleep 2 && PATH="$PATH:$PWD/node_modules/.bin" find ./tests/integration -name "*.js" | parallel -x ./node_modules/.bin/casperjs test {} --verbose --log-level=info --engine=phantomjs --username=admin --password=admin --token=1234567890ABCDEFGHJKLMNOP --url=http://$IP:3003 --font-linux=fl-ubuntu-inverse
 - cd ..
 - chmod +x ./pictl
 - ./pictl exec "uname -a"
