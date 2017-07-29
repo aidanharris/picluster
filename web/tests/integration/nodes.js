@@ -1,4 +1,3 @@
-// Comment to trigger re-build on travis
 casper.options.waitTimeout = 20000;
 
 casper.test.begin('nodes.html', 2, function(test) {
