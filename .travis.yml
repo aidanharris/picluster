@@ -9,6 +9,7 @@ before_install:
   - sudo add-apt-repository -y "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
   - sudo apt-get -qq update
   - sudo apt-get install -y docker-ce
+  -
 node_js:
   - "node"
 
@@ -17,9 +18,9 @@ script:
 - sed -i "s/127.0.0.1/$IP/" config.json
 - sed -i "s/192.168.0.116/$IP/" pictl
 - npm install -g node-gyp
-- cd server;npm install; sudo node server.js&
-- cd ../agent;npm install; sudo node agent.js&
-- cd ../web;npm install; sudo node webconsole.js&
+- cd server;npm install; sudo -E node server.js&
+- cd ../agent;npm install; sudo -E node agent.js&
+- cd ../web;npm install; sudo -E node webconsole.js&
 - sleep 2 && PATH="$PATH:$PWD/node_modules/.bin" find ./tests/integration -name "*.js" | parallel -x ./node_modules/.bin/casperjs test {} --verbose --log-level=info --engine=phantomjs --username=admin --password=admin --token=1234567890ABCDEFGHJKLMNOP --url=http://$IP:3003 --font-linux=fl-ubuntu-inverse
 - cd ..
 - chmod +x ./pictl
