@@ -17,7 +17,7 @@
 		}
 
 		#containerlist {
-			font-size: 18px;
+			font-size: 16px;
 		}
 
 		#container {
@@ -64,7 +64,7 @@
 			padding: 0;
 			font-size: 12px;
 			border: 1px solid #888;
-			width: 75%;
+			width: 50%;
 			box-shadow: 0 4px 8px 0 rgba(0, 0, 0, 0.2), 0 6px 20px 0 rgba(0, 0, 0, 0.19);
 			-webkit-animation-name: animatetop;
 			-webkit-animation-duration: 0.4s;
@@ -132,6 +132,7 @@
 			border: 1px solid #888;
 			width: 70%;
 			height: : 70%;
+			overflow: auto;
 			box-shadow: 0 4px 8px 0 rgba(0, 0, 0, 0.2), 0 6px 20px 0 rgba(0, 0, 0, 0.19);
 			-webkit-animation-name: animatetop;
 			-webkit-animation-duration: 0.4s;
@@ -165,7 +166,7 @@
 				}
 			}
 
-			var command = ["docker", "pull", image].join(' ');
+			var command = ["docker", "image", "pull", image].join(' ');
 			var nodes = document.getElementsByName('nodeslist');
 			var div = document.getElementById('modal-body2');
 			var username = document.getElementsByName('imageauth-user')[0].value || '';
@@ -176,37 +177,25 @@
 				command = ["docker", "login", registry, "--username", username, "--password", password].join(' ') + ' && ' + command;
 			}
 
-			// Pull image on all nodes
-			if (nodes[0].checked) {
-				$.post(path, {
-					token: parent.token,
-					command: command,
-					node: '*'
-				}, function(data) {
-					$("#command").val(data);
-					$("#command_output").val('Sent request to the server. Please check the logs and running containers for updated information.\n' + data);
-				});
-			} else {
-				var check_counter = 0;
-				nodes.forEach(function(node, i) {
-					if (nodes[i].checked) {
-						nodes.forEach(function(node, i) {
-							if (nodes[i].checked) {
-								check_counter++;
-								$.post(path, {
-									token: parent.token,
-									command: command,
-									node: node.value
-								}, function(data) {
-									div.innerHTML = 'Sent request to the server. Please check the logs and running containers for updated information.<br><br>' + data.replace(/(?:\r\n|\r|\n)/g, '<br />')
-								});
-							}
-						});
-					}
-				});
-				if (check_counter == 0) {
-					div.innerHTML = 'Error, no hosts were selected.';
+			var check_counter = 0;
+			nodes.forEach(function(node, i) {
+				if (nodes[i].checked) {
+					nodes.forEach(function(node, i) {
+						if (nodes[i].checked) {
+							check_counter++;
+							$.post(path, {
+								token: parent.token,
+								command: command,
+								node: node.value
+							}, function(data) {});
+						}
+					});
 				}
+			});
+			if (check_counter == 0) {
+				div.innerHTML = 'Error, no hosts were selected.';
+			} else {
+				div.innerHTML = 'Sent request to the server. Please check the logs and running containers for updated information.';
 			}
 
 			return true;
@@ -247,7 +236,8 @@
 					</fieldset>
 					<fieldset name="nodesList" id="nodesList">
 						<legend>Nodes:</legend>
-						<label for="nodeslist">All</label><input type="checkbox" name="nodeslist" onClick="checkAll(this);" checked="checked" />
+						<label for="nodeslist">All</label><input type="checkbox" name="nodeslist" onClick="checkAll(this);" checked="checked"/>
+						&nbsp;&nbsp;&nbsp;&nbsp;
 					</fieldset>
 					<p align=center>
 						<button onclick="exec()" id="myBtn"> Submit</button>
@@ -288,7 +278,7 @@
 								var parse_data = data.split(',');
 								var option = '';
 								for (var i = 0; i < parse_data.length; i++) {
-									option += '<label for="nodeslist">' + parse_data[i] + '</label><input type="checkbox" name="nodeslist" checked="checked" value="' + parse_data[i] + '" />';
+									option += '<label for="nodeslist">' + parse_data[i] + '</label><input type="checkbox" name="nodeslist" checked="checked" value="' + parse_data[i] + '" />&nbsp;&nbsp;&nbsp;&nbsp;';
 								}
 								$('#nodesList').append(option);
 								var selectImage = function(event, ui) {
