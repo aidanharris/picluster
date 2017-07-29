@@ -6,6 +6,14 @@ module.exports = function(_this) {
         document.getElementById('password').value = password;
         document.getElementById('myBtn').click();
       }, username, password);
+    },
+    getCasperEngine: function() {
+      try {
+        slimer;
+        return 'slimerjs';
+      } catch (e) {
+        return 'phantomjs';
+      }
     }
   };
 };
