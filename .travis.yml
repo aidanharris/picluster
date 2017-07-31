@@ -11,6 +11,7 @@ before_install:
 
 script:
 - IP=`ip addr show | grep -i eth0 | grep -i inet | cut -d ' ' -f 6 | cut -d '/' -f1`
+- cp config-example.json config.json
 - sed -i "s/127.0.0.1/$IP/" config.json
 - sed -i "s/192.168.0.116/$IP/" pictl
 - sudo docker image build ./docker/nginx -t nginx -f ./docker/nginx/Dockerfile
@@ -18,7 +19,6 @@ script:
 - sudo docker image build . -t local/testing:alpine -f web/tests/integration/Dockerfile.alpine
 - sudo docker container run -d --name nginx -p 80:80 nginx
 - sudo docker container run -d --name minio -p 9000:9000 minio
-- cp config-example.json config.json
 - cd server;npm install --production; sudo node server.js&
 - cd ../agent;npm install --production; sudo node agent.js&
 - cd ../web;npm install --production; sudo node webconsole.js&
