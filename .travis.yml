@@ -1,6 +1,5 @@
 before_install:
   - sudo apt-get -qq update
-  - sudo apt-get install -y parallel
   - sudo apt-get remove -y docker docker-engine docker.io
   - sudo apt-get install -y apt-transport-https ca-certificates curl software-properties-common
   - curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
@@ -17,7 +16,7 @@ script:
 - npm install -g node-gyp
 - sudo docker image build ./docker/nginx -t nginx -f ./docker/nginx/Dockerfile
 - sudo docker image build ./docker/minio -t minio -f ./docker/minio/Dockerfile
-- sudo docker build -f web/tests/integration/Dockerfile.alpine -t local/testing:alpine .
+- sudo docker image build . -t local/testing:alpine -f web/tests/integration/Dockerfile.alpine
 - sudo docker container run -d --name nginx -p 80:80 nginx
 - sudo docker container run -d --name minio -p 9000:9000 minio
 - cd server;npm install; sudo node server.js&
