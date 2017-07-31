@@ -23,7 +23,7 @@ script:
 - cd ../agent;npm install; sudo node agent.js&
 - cd ../web;npm install; sudo node webconsole.js&
 - cd ..
-- sudo docker run -it --rm -v "$PWD:$PWD" -w "$PWD/web/tests/integration" -e URL=http://$IP:3003 local/testing:alpine
+- sudo docker run -it --rm -v "$PWD:$PWD" -w "$PWD/web/tests/integration" -e URL=http://$IP:3003 -e FONTLINUX=fl-ubuntu-inverse local/testing:alpine
 - chmod +x ./pictl
 - ./pictl exec "uname -a"
 - ./pictl nodes
