@@ -18,6 +18,7 @@ script:
 - sudo docker image build . -t local/testing:alpine -f web/tests/integration/Dockerfile.alpine
 - sudo docker container run -d --name nginx -p 80:80 nginx
 - sudo docker container run -d --name minio -p 9000:9000 minio
+- cp config-example.json config.json
 - cd server;npm install --production; sudo node server.js&
 - cd ../agent;npm install --production; sudo node agent.js&
 - cd ../web;npm install --production; sudo node webconsole.js&
