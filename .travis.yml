@@ -17,13 +17,14 @@ script:
 - npm install -g node-gyp
 - sudo docker image build ./docker/nginx -t nginx -f ./docker/nginx/Dockerfile
 - sudo docker image build ./docker/minio -t minio -f ./docker/minio/Dockerfile
+- sudo docker build -f web/tests/integration/Dockerfile.alpine -t local/testing:alpine .
 - sudo docker container run -d --name nginx -p 80:80 nginx
 - sudo docker container run -d --name minio -p 9000:9000 minio
 - cd server;npm install; sudo node server.js&
 - cd ../agent;npm install; sudo node agent.js&
 - cd ../web;npm install; sudo node webconsole.js&
-- sleep 2 && PATH="$PATH:$PWD/node_modules/.bin" find ./tests/integration -name "*.js" | parallel -x ./node_modules/.bin/casperjs test {} --verbose --log-level=info --engine=phantomjs --username=admin --password=admin --token=1234567890ABCDEFGHJKLMNOP --url=http://$IP:3003 --font-linux=fl-ubuntu-inverse
 - cd ..
+- sudo docker run -it --rm -v "$PWD:$PWD" -w "$PWD/web/tests/integration" -e URL=http://$IP:3003 local/testing:alpine
 - chmod +x ./pictl
 - ./pictl exec "uname -a"
 - ./pictl nodes
