@@ -106,21 +106,36 @@ checkUpdate(async function() {
   const remotecommit = await upstreamCommit();
   console.log(localcommit);
   console.log(remotecommit);
-  if (localcommit !== remotecommit) {
+  if (localcommit === remotecommit) { return; }
+  try {
+    execSync(`git fetch https://github.com/picluster/picluster.git ${getChannel()}`);
+  } catch (err) {
+    // An error probably means the branch doesn't exist on the remote end or github
+    // is having issues...
+    console.error(`Command \`${err.cmd}\` has failed with exit code ${err.status}`);
+  }
+  if (await currentBranch() !== getChannel()) {
     try {
-      execSync(`git fetch https://github.com/picluster/picluster.git ${getChannel()}`);
+      execSync(`git checkout ${getChannel()}`);
     } catch (err) {
-      // An error probably means the branch doesn't exist on the remote end or github
-      // is having issues...
+      // If an error occurs then the working directory is probably dirty...
       console.error(`Command \`${err.cmd}\` has failed with exit code ${err.status}`);
     }
-    if (await currentBranch() !== getChannel()) {
-      try {
-        execSync(`git checkout ${getChannel()}`);
-      } catch (err) {
-        // If an error occurs then the working directory is probably dirty...
-        console.error(`Command \`${err.cmd}\` has failed with exit code ${err.status}`);
-      }
-    }
   }
+  [
+    "agent",
+    "server",
+    "web",
+    "updater"
+  ].forEach(function(dir) {
+    try {
+      execSync([
+        "npm",
+        "install",
+        "--production"
+      ].join(' '), {cwd: `${__dirname}/../${dir}`});
+    } catch (err) {
+      console.error(`Command \`${err.cmd}\` has failed with exit code ${err.status}`);
+    }
+  });
 }, getInterval());
