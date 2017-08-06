@@ -1,5 +1,6 @@
 const fs = require('fs');
 const exec = require('child-process-promise').exec;
+const execSync = require('child_process').execSync;
 
 // Change the working directory to this script
 // This is important because the working directory
@@ -42,7 +43,7 @@ function getInterval() {
              validateInterval(config.updater.interval) > -1) {
     return Number(config.updater.interval);
   } else {
-    return 3600; // Check once an hour by default
+    return 3600000; // Check once an hour by default
   }
 }
 
@@ -85,12 +86,41 @@ function localCommit() {
   });
 }
 
+function currentBranch() {
+  return new Promise(function(resolve, reject) {
+    exec([
+      "git",
+      "rev-parse",
+      "--abbrev-ref",
+      "HEAD"
+    ].join(' ')).then(function(output) {
+      return resolve(output.stdout.replace(/\s.*/g, ""));
+    }).catch(function(err) {
+      return reject(err);
+    });
+  });
+}
+
 checkUpdate(async function() {
   const localcommit = await localCommit();
   const remotecommit = await upstreamCommit();
   console.log(localcommit);
   console.log(remotecommit);
   if (localcommit !== remotecommit) {
-    console.log('Update Time...');
+    try {
+      execSync(`git fetch https://github.com/picluster/picluster.git ${getChannel()}`);
+    } catch (err) {
+      // An error probably means the branch doesn't exist on the remote end or github
+      // is having issues...
+      console.error(`Command \`${err.cmd}\` has failed with exit code ${err.status}`);
+    }
+    if (await currentBranch() !== getChannel()) {
+      try {
+        execSync(`git checkout ${getChannel()}`);
+      } catch (err) {
+        // If an error occurs then the working directory is probably dirty...
+        console.error(`Command \`${err.cmd}\` has failed with exit code ${err.status}`);
+      }
+    }
   }
 }, getInterval());
