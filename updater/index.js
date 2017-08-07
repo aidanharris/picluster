@@ -107,6 +107,13 @@ checkUpdate(async function() {
   console.log(localcommit);
   console.log(remotecommit);
   if (localcommit === remotecommit) { return; }
+  // Stash changes. This will deal with the whole "What if there are conflicts?" situation
+  // Git will store the changes and they can be re-applied later via `git stash apply`
+  try {
+    execSync("git stash");
+  } catch (err) {
+    console.error(`Command \`${err.cmd}\` has failed with exit code ${err.status}`);
+  }
   try {
     execSync(`git fetch https://github.com/picluster/picluster.git ${getChannel()}`);
   } catch (err) {
