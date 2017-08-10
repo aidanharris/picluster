@@ -36,7 +36,7 @@ function checkUpdate(func, interval) {
   // we won't run in the background we'll check for updates
   // once and then exit. Cron will be responsible for scheduling
   // when the script runs. A sample cronjob is as follows:
-  // @hourly NODE_ENV=cron node /path/to/picluster/updater/index.js
+  // @hourly NODE_ENV=cron node /path/to/picluster/updater/updater.js
   if (process.env.NODE_ENV === 'cron') {
     return func();
   } else {
