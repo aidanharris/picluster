@@ -9,6 +9,7 @@
   "author": "",
   "license": "GPL-3.0",
   "dependencies": {
-    "child-process-promise": "^2.2.1"
+    "child-process-promise": "^2.2.1",
+    "pm2": "^2.6.1"
   }
 }

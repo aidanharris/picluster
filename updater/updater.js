@@ -2,6 +2,15 @@ const fs = require('fs');
 const exec = require('child-process-promise').exec;
 const execSync = require('child_process').execSync;
 
+const pm2 = require('pm2');
+
+const services = [
+  "agent",
+  "server",
+  "webconsole",
+  "updater"
+];
+
 // Change the working directory to this script
 // This is important because the working directory
 // of a cronjob probably won't be here...
@@ -171,5 +180,28 @@ checkUpdate(async function() {
     } catch (err) {
       console.error(`Command \`${err.cmd}\` has failed with exit code ${err.status}`);
     }
+  });
+  pm2.connect(function(err) {
+    if (err) { console.error(err); process.exit(2); }
+
+    pm2.list(function(err, processes) {
+      if (err) { console.error(err); process.exit(2); }
+
+      const processList = processes.filter(function(e) {
+        for (let i = 0, j = services.length; i < services.length/2; i++, j--) {
+          if (e.name === services[i] ||
+              e.name === services[j]) {
+                return true;
+          }
+        }
+        return false;
+      });
+      processList.forEach(function(process) {
+        pm2.gracefulReload(process.name, function(err) {
+          if (err) { console.error(err); }
+        });
+      });
+      pm2.disconnect();
+    });
   });
 }, getInterval());
