@@ -196,11 +196,13 @@ checkUpdate(async function() {
         }
         return false;
       });
+
       processList.forEach(function(process) {
         pm2.gracefulReload(process.name, function(err) {
           if (err) { console.error(err); }
         });
       });
+
       pm2.disconnect();
     });
   });
