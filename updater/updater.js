@@ -126,6 +126,17 @@ function trackingBranch() {
   });
 }
 
+// `git stash` requires an email to be set
+// We'll set one locally (for this repo) if
+// one isn't already set.
+function getEmail() {
+  try {
+    return execSync(`git config user.email`);
+  } catch (err) {
+    return '';
+  }
+}
+
 checkUpdate(async function() {
   const localcommit = await localCommit();
   const remotecommit = await upstreamCommit();
@@ -134,8 +145,24 @@ checkUpdate(async function() {
   if (localcommit === remotecommit) { return; }
   // Stash changes. This will deal with the whole "What if there are conflicts?" situation
   // Git will store the changes and they can be re-applied later via `git stash apply`
+  var unsetEmail = false;
   try {
+    if (getEmail() === '') {
+      unsetEmail = true;
+      try {
+        execSync(`git config user.email "you@example.com"`);
+      } catch (err) {
+        console.error(`Command \`${err.cmd}\` has failed with exit code ${err.status}`);
+      }
+    }
     execSync("git stash");
+    if (unsetEmail) {
+      try {
+        execSync(`git config --unset user.email`);
+      } catch (err) {
+        console.error(`Command \`${err.cmd}\` has failed with exit code ${err.status}`);
+      }
+    }
   } catch (err) {
     console.error(`Command \`${err.cmd}\` has failed with exit code ${err.status}`);
   }
