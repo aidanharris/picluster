@@ -11,5 +11,9 @@
   "dependencies": {
     "child-process-promise": "^2.2.1",
     "pm2": "^2.6.1"
+  },
+  "devDependencies": {
+    "babel-cli": "^6.24.1",
+    "babel-plugin-transform-async-to-generator": "^6.24.1"
   }
 }
