@@ -101,6 +101,22 @@ function currentBranch() {
   });
 }
 
+function trackingBranch() {
+  return new Promise(function(resolve, reject) {
+    exec([
+      "git",
+      "rev-parse",
+      "--abbrev-ref",
+      "--symbolic-full-name",
+      "@{u}"
+    ].join(' ')).then(function(output) {
+      return resolve(output.stdout.replace(/\s.*/g, ""));
+    }).catch(function(err) {
+      return reject(err);
+    });
+  });
+}
+
 checkUpdate(async function() {
   const localcommit = await localCommit();
   const remotecommit = await upstreamCommit();
@@ -129,6 +145,17 @@ checkUpdate(async function() {
       console.error(`Command \`${err.cmd}\` has failed with exit code ${err.status}`);
     }
   }
+  let trackingbranch;
+  try {
+    trackingbranch = await trackingBranch();
+  } catch (err) {
+    // Assume the tracking branch is origin
+    // To Do:
+    //  * Don't make this assumption, look at the remotes (git remote -v) and figure out which one we should use.
+    //  Add a remote pointing to upstream picluster and track this if need be, in case any funny business is going on...
+    trackingbranch = "origin";
+  }
+  execSync(`git pull --ff-only ${trackingbranch.replace('/', ' ')}`);
   [
     "agent",
     "server",
