@@ -1,5 +1,9 @@
 var http = require('http');
 var fs = require('fs');
+var multer = require('multer');
+var upload = multer({
+  dest: '../'
+});
 if (process.env.PICLUSTER_CONFIG) {
   var config = JSON.parse(fs.readFileSync(process.env.PICLUSTER_CONFIG, 'utf8'));
 } else {
@@ -759,6 +763,45 @@ app.post('/addcontainer', function(req, res) {
   }
 });
 
+function sendFile(file, name) {
+
+  var formData = {
+    name: 'file',
+    token: token,
+    file: fs.createReadStream(file)
+  };
+
+  request.post({
+    url: 'http://' + server + ':' + server_port + '/receive-file',
+    formData: formData
+  }, function(err, httpResponse, body) {
+    if (err) {
+      console.error('upload failed:', err);
+    } else {
+      console.log('Upload successful!');
+    }
+  });
+}
+
+app.post('/upload', upload.single('file'), function(req, res, next) {
+  var check_token = req.body.token;
+  var host = req.body.host;
+  var file = req.body.file;
+  if ((check_token != token) || (!check_token)) {
+    res.end('\nError: Invalid Credentials')
+  } else {
+
+    fs.readFile(req.file.path, function(err, data) {
+      var newPath = "../" + req.file.originalname;
+      fs.writeFile(newPath, data, function(err) {
+        sendFile(newPath, req.file.originalname);
+        res.end("");
+      });
+    });
+  }
+});
+
+
 app.post('/removecontainerconfig', function(req, res) {
   var check_token = req.body.token;
   var container = req.body.container;
@@ -1069,6 +1112,9 @@ app.get('/server.jpeg', function(req, res) {
 });
 app.get('/favicon.ico', function(req, res) {
   res.sendFile(__dirname + '/favicon.ico');
+});
+app.get('/upload.html', function(req, res) {
+  res.sendFile(__dirname + '/upload.html');
 });
 app.get('/searching.jpeg', function(req, res) {
   res.sendFile(__dirname + '/searching.jpeg');

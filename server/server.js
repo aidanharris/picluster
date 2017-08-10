@@ -23,6 +23,10 @@ var log = '';
 var token = config.token;
 var dockerFolder = config.docker;
 var container_faillog = [];
+var multer = require('multer');
+var upload = multer({
+  dest: '../'
+});
 
 if (config.elasticsearch && config.elasticsearch_index) {
   var mapping = {
@@ -105,7 +109,7 @@ app.get('/status', function(req, res) {
     res.end('\nError: Invalid Credentials')
   } else {
     var command = JSON.stringify({
-      "command": 'hostname;docker container ps;node -e \'const getos = require("getos");getos(function(e,os){var dist = (e) ? "" : os.dist || os.os;console.log("Dist: " + dist);})\';',
+      "command": 'hostname;docker container ps;node -e \'const getos = require("picluster-getos");getos(function(e,os){var dist = (e) ? "" : os.dist || os.os;console.log("Dist: " + dist);})\';',
       "token": token
     });
     for (var i = 0; i < config.layout.length; i++) {
@@ -154,7 +158,7 @@ app.get('/nodes', function(req, res) {
     res.end('\nError: Invalid Credentials')
   } else {
     var command = JSON.stringify({
-      "command": 'hostname;echo;uname -a;df -h /;node -e \'const getos = require("getos");getos(function(e,os){var dist = (e) ? "" : os.dist || os.os;console.log("Dist: " + dist);})\'',
+      "command": 'hostname;echo;uname -a;df -h /;node -e \'const getos = require("picluster-getos");getos(function(e,os){var dist = (e) ? "" : os.dist || os.os;console.log("Dist: " + dist);})\'',
       "token": token
     });
     for (var i = 0; i < config.layout.length; i++) {
@@ -193,7 +197,7 @@ app.get('/images', function(req, res) {
     res.end('\nError: Invalid Credentials')
   } else {
     var command = JSON.stringify({
-      "command": 'hostname;docker image list;node -e \'const getos = require("getos");getos(function(e,os){var dist = (e) ? "" : os.dist || os.os;console.log("Dist: " + dist);})\';',
+      "command": 'hostname;docker image list;node -e \'const getos = require("picluster-getos");getos(function(e,os){var dist = (e) ? "" : os.dist || os.os;console.log("Dist: " + dist);})\';',
       "token": token
     });
     for (var i = 0; i < config.layout.length; i++) {
@@ -1232,6 +1236,7 @@ app.post('/listcontainers', function(req, res) {
 });
 
 
+
 app.post('/listnodes', function(req, res) {
   var command = req.body.command;
   var check_token = req.body.token;
@@ -1254,6 +1259,50 @@ app.post('/listnodes', function(req, res) {
     res.send(output);
   }
 });
+
+function copyToAgents(file) {
+  Object.keys(config.layout).forEach(function(get_node, i) {
+    Object.keys(config.layout[i]).forEach(function(key) {
+      const node = config.layout[i].node;
+      if ((!config.layout[i].hasOwnProperty(key) || key.indexOf('node') > -1)) {
+        return;
+      }
+
+      var formData = {
+        name: 'file',
+        token: token,
+        file: fs.createReadStream(file)
+      };
+
+      request.post({
+        url: 'http://' + node + ':' + agentPort + '/receive-file',
+        formData: formData
+      }, function(err, httpResponse, body) {
+        if (!err) {
+          addLog('\nCopied ' + file + ' to ' + node);
+          console.log('\nCopied ' + file + ' to ' + node);
+        }
+      });
+    });
+  });
+}
+
+app.post('/receive-file', upload.single('file'), function(req, res, next) {
+  var check_token = req.body.token;
+  if ((check_token != token) || (!check_token)) {
+    res.end('\nError: Invalid Credentials')
+  } else {
+    fs.readFile(req.file.path, function(err, data) {
+      var newPath = "../" + req.file.originalname;
+      fs.writeFile(newPath, data, function(err) {
+        copyToAgents(newPath);
+      });
+    });
+    res.end('');
+  }
+});
+
+
 
 app.post('/listcommands', function(req, res) {
   var command = req.body.command;
