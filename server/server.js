@@ -248,28 +248,25 @@ app.get('/nodes', (req, res) => {
   if ((check_token !== token) || (!check_token)) {
     res.end('\nError: Invalid Credentials');
   } else {
-    Object.keys(config.layout).forEach((get_node, i) => {
-      Object.keys(config.layout[i]).forEach(key => {
-        if (!config.layout[i].hasOwnProperty(key)) {
-          return;
-        }
-        const node = config.layout[i].node;
-        if (config.layout[i].node) {
-          const options = {
-            url: 'http://' + node + ':' + agentPort + '/node-status?token=' + token,
-            method: 'GET'
-          };
+    Object.keys(config.layout).forEach(get_node => {
+      const node = get_node.node;
+      if (!node) {
+        console.error('Invalid Config for node', get_node);
+        return;
+      }
+      const options = {
+        url: 'http://' + node + ':' + agentPort + '/node-status?token=' + token,
+        method: 'GET'
+      };
 
-          request(options, (error, response) => {
-            if (error) {
-              console.error(error);
-            } else {
-              const check = JSON.parse(response.body);
-              if (check.cpu_percent > 0) {
-                addData(check);
-              }
-            }
-          });
+      request(options, (error, response) => {
+        if (error) {
+          console.error(error);
+        } else {
+          const check = JSON.parse(response.body);
+          if (check.cpu_percent > 0) {
+            addData(check);
+          }
         }
       });
     });
