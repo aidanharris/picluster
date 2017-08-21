@@ -29,7 +29,18 @@
             "radix": "off",
             "max-nested-callbacks": "warn",
             "no-path-concat": "warn"
-        }
+        },
+        "overrides": [
+            {
+                "files": [
+                    "web/src/*",
+                    "web/src/*/*"
+                ],
+                "envs": [
+                    "browser"
+                ]
+            }
+        ]
     },
     "devDependencies": {
         "xo": "^0.18.2"
