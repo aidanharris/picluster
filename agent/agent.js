@@ -1,49 +1,134 @@
-/* eslint "no-warning-comments": [1, { "terms": ["todo","fixme"] }] */
 const http = require('http');
+const https = require('https');
 const fs = require('fs');
 const os = require('os');
 const unzip = require('unzip');
 const express = require('express');
 const request = require('request');
-
-let config;
-if (process.env.PICLUSTER_CONFIG) {
-  config = JSON.parse(fs.readFileSync(process.env.PICLUSTER_CONFIG, 'utf8'));
-} else {
-  config = JSON.parse(fs.readFileSync('../config.json', 'utf8'));
-}
-const port = config.agent_port;
-const app = express();
+const diskspace = require('diskspace');
 const bodyParser = require('body-parser');
-
-app.use(bodyParser());
-const server = http.createServer(app);
-
-const node = os.hostname();
+const multer = require('multer');
+const getos = require('picluster-getos');
 const async = require('async');
 const exec = require('child-process-promise').exec;
+const sysinfo = require('systeminformation');
 
-const noop = function () {};
+const config = process.env.PICLUSTER_CONFIG ? JSON.parse(fs.readFileSync(process.env.PICLUSTER_CONFIG, 'utf8')) : JSON.parse(fs.readFileSync('../config.json', 'utf8'));
+const app = express();
+
+if (config.ssl_self_signed) {
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+}
+
+app.use(bodyParser());
+
+const upload = multer({
+  dest: '../'
+});
+const scheme = config.ssl ? 'https://' : 'http://';
+const ssl_self_signed = config.ssl_self_signed === false;
+const server = config.web_connect;
+const server_port = config.server_port;
+const agent_port = config.agent_port;
+const node = os.hostname();
+const token = config.token;
+const noop = () => {};
 let vip = '';
 let vip_slave = '';
 let ip_add_command = '';
 let ip_delete_command = '';
 let vip_ping_time = '';
-const token = config.token;
-const multer = require('multer');
+let cpu_percent = 0;
+let os_type = '';
+let disk_percentage = 0;
+let total_running_containers = 0;
+let running_containers = '';
+let cpu_cores = 0;
+let memory_buffers = 0;
+let memory_swap = 0;
+let memory_total = 0;
+let memory_used = 0;
+let memory_percentage = 0;
+let images = '';
 
-const upload = multer({
-  dest: '../'
-});
+function monitoring() {
+  sysinfo.mem(data => {
+    memory_total = data.total;
+    memory_buffers = data.buffcache;
+    memory_used = data.used;
+    memory_swap = data.swapused;
+    const this_os = os.platform();
+
+    if (this_os.indexOf('linux') > -1) {
+      memory_percentage = Math.round((memory_used - memory_buffers) / memory_total * 100);
+    } else {
+      memory_percentage = Math.round((memory_swap + memory_buffers) / memory_total * 100);
+    }
+  });
+
+  exec('docker container ps -q', (err, stdout) => {
+    if (err) {
+      console.error(err);
+    }
+    total_running_containers = stdout.split('\n').length - 1;
+  });
+
+  exec('docker ps --format "{{.Names}}"', (err, stdout) => {
+    if (err) {
+      console.error(err);
+    }
+    running_containers = stdout.split('\n');
+  });
+
+  exec('docker images --format "table {{.Repository}}"', (err, stdout) => {
+    if (err) {
+      console.error(err);
+    }
+    images = stdout.split('\n');
+    for (const i in images) {
+      if ((images[i].indexOf('REPOSITORY') > -1) || images[i].indexOf('<none>') > -1) {
+        images[i] = '';
+      }
+    }
+    images = images.filter((e, pos) => {
+      return e.length > 0 && images.indexOf(e) === pos;
+    });
+    images = images.sort();
+  });
+
+  setTimeout(() => {
+    getos((e, os) => {
+      os_type = (e) ? '' : os.dist || os.os;
+    });
+
+    diskspace.check('/', (err, result) => {
+      disk_percentage = Math.round(result.used / result.total * 100);
+    });
+
+    require('cpu-stats')(1000, (error, result) => {
+      cpu_cores = 0;
+      let usage = 0;
+      result.forEach(e => {
+        usage += e.cpu;
+        cpu_cores++;
+      });
+      cpu_percent = usage;
+    });
+    monitoring();
+  }, 3000);
+}
+
+monitoring();
 
 if (config.autostart_containers) {
   console.log('Starting all the containers.....');
+
   const options = {
-    host: config.web_connect,
-    path: '/start?token=' + token + '&container=*',
-    port: config.server_port
+    url: `${scheme}${server}:${server_port}/start?token=${token}&container=*`,
+    rejectUnauthorized: ssl_self_signed
   };
-  http.get(options).on('error', e => {
+
+  request.get(options).on('error', e => {
     console.error(e);
   });
 }
@@ -65,7 +150,7 @@ if (config.vip_ip && config.vip) {
           }
           vip_slave = config.vip[i].slave;
           const vip_eth_device = config.vip[i].vip_eth_device;
-          ip_add_command = 'ip addr add ' + config.vip_ip + ' dev ' + vip_eth_device;
+          ip_add_command = 'ip addr add ' + config.vip_ip + '/32 dev ' + vip_eth_device;
           ip_delete_command = 'ip addr del ' + config.vip_ip + '/32 dev ' + vip_eth_device;
           vip_ping_time = config.vip[i].vip_ping_time;
           exec(ip_delete_command).then(send_ping).catch(send_ping);
@@ -80,8 +165,10 @@ function send_ping() {
     const token_body = JSON.stringify({
       token
     });
+
     const options = {
-      url: 'http://' + vip_slave + ':' + port + '/pong',
+      url: `${scheme}${vip_slave}:${agent_port}/pong`,
+      rejectUnauthorized: ssl_self_signed,
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -92,10 +179,8 @@ function send_ping() {
 
     request(options, (error, response, body) => {
       let found_vip = false;
-
-      if ((error || response.statusCode !== '200')) {
+      if (error) {
         const cmd = ip_add_command;
-        // Console.log("\nUnable to connect to: " + vip_slave + ". Bringing up VIP on this host.");
         exec(cmd).then(noop).catch(noop);
       } else {
         const interfaces = require('os').networkInterfaces();
@@ -135,6 +220,27 @@ app.get('/rsyslog', (req, res) => {
     res.end('\nError: Invalid Credentials');
   } else {
     res.sendFile(config.rsyslog_logfile);
+  }
+});
+
+app.get('/node-status', (req, res) => {
+  const check_token = req.query.token;
+  if ((check_token !== token) || (!check_token)) {
+    res.end('\nError: Invalid Credentials');
+  } else {
+    const json_output = JSON.stringify({
+      cpu_percent,
+      hostname: node,
+      os_type: (os_type === '') ? os.platform() : os_type,
+      disk_percentage,
+      total_running_containers,
+      running_containers,
+      images,
+      cpu_cores,
+      memory_percentage
+    });
+
+    res.send(json_output);
   }
 });
 
@@ -188,16 +294,12 @@ app.post('/receive-file', upload.single('file'), (req, res) => {
   if ((check_token !== token) || (!check_token)) {
     res.end('\nError: Invalid Credentials');
   } else {
-    /* eslint-disable no-unused-vars */
-    /* eslint-disable handle-callback-err */
-    fs.readFile(req.file.path, (err, data) => { // FixMe: What's this code supposed to be doing?
+    fs.readFile(req.file.path, (err, data) => {
       const newPath = '../' + req.file.originalname;
-      fs.writeFile(newPath => {
+      fs.writeFile(newPath, data, err => { // eslint-disable-line no-unused-vars
         unzipFile(newPath);
       });
     });
-    /* eslint-enable no-unused-vars */
-    /* eslint-enable handle-callback-err */
     res.end('Done');
   }
 });
@@ -257,6 +359,20 @@ app.post('/run', (req, res) => {
   });
 });
 
-server.listen(port, () => {
-  console.log('Listening on port %d', port);
-});
+if (config.ssl && config.ssl_cert && config.ssl_key) {
+  console.log('SSL Agent API enabled');
+  const ssl_options = {
+    cert: fs.readFileSync(config.ssl_cert),
+    key: fs.readFileSync(config.ssl_key)
+  };
+  const agent = https.createServer(ssl_options, app);
+  agent.listen(agent_port, () => {
+    console.log('Listening on port %d', agent_port);
+  });
+} else {
+  console.log('Non-SSL Agent API enabled');
+  const agent = http.createServer(app);
+  agent.listen(agent_port, () => {
+    console.log('Listening on port %d', agent_port);
+  });
+}

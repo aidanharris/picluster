@@ -8,8 +8,7 @@
 
 [![Build Status](https://travis-ci.org/picluster/picluster.svg?branch=master)](https://travis-ci.org/picluster/picluster) [![License: GPL v3](https://img.shields.io/badge/License-GPL%20v3-blue.svg)](http://www.gnu.org/licenses/gpl-3.0)
 
-![Pic](http://i.imgur.com/N7KBk6z.pngg)
-![Pic](http://i.imgur.com/h63NLRI.png)
+![Pic](https://i.imgur.com/rzhS362.png)
 
 ## Support us on [Patreon](https://www.patreon.com/picluster)
 ## Video [Demo](https://youtu.be/6r29Vc6sbXI)
@@ -22,8 +21,8 @@
 - Run commands in parallel across Nodes
 - Heartbeat for services
 - Easily build and orchestrate Docker images across nodes
-- Command-line interface
 - Web interface
+- Monitor host metrics (Disk, CPU, Memory)
 - HTTP interface
 - Virtual IP Manager
 - Rsyslog Analytics
@@ -33,11 +32,26 @@
 - Automatic container failover to different nodes
 - Pull container images from a registry
 - Upload Dockerfile archives to the entire cluster
+- Functions-as-a-Service (FaaS)
 
 ## Prerequisites
 
 - Docker
 - Node.js
+- OpenSSL
+- pq
+- git
+- curl
+
+### Ubuntu
+```
+apt-get install openssl git node docker pq curl
+```
+
+### Arch Linux
+```
+pacman -S openssl git node docker pq curl
+```
 
 If you are using Docker 1.12.x and earlier, please use [PiCluster v1.0](https://github.com/picluster/picluster/tree/1.0)
 
@@ -74,10 +88,18 @@ Finally, in your web browser go to <http://127.0.0.1:3003>
 
 [See Wiki](https://github.com/picluster/picluster/wiki/Upgrading)
 
+## Functions-as-a-Service (FAAS)
+[See Wiki](https://github.com/picluster/picluster/wiki/Functions-as-a-Service-(FaaS))
+<br>
+[Video Demo](https://www.youtube.com/watch?v=QsXRt_oTJSE)
 
 ## Configuring and using the command-line client "pictl"
 
 [See Wiki](https://github.com/picluster/picluster/wiki/Pictl)
+
+## SSL/TLS
+
+[See Wiki](https://github.com/picluster/picluster/wiki/SSL-Configuration)
 
 ## Using pm2 to init PiCluster on systemd
 
@@ -89,9 +111,13 @@ Finally, in your web browser go to <http://127.0.0.1:3003>
 
 # Authors and Contributions
 
-Project created by Phillip Tribble. [LinkedIn](https://www.linkedin.com/in/philliptribble) , [Twitter](https://twitter.com/rusher81572)
+* Project created by Phillip Tribble. [LinkedIn](https://www.linkedin.com/in/philliptribble) , [Twitter](https://twitter.com/rusher81572)
 
-PiCluster Logos by chzbacon.
+* [TokinRing](https://github.com/TokinRing), core developer.
+
+* [AidanHarris](https://github.com/aidanharris), core developer.
+
+* PiCluster Logos by chzbacon.
 
 ## Images
 

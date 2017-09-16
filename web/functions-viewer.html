@@ -4,38 +4,47 @@
 	<script src="/assets/jquery.min.js"></script>
 	<link rel="stylesheet" href="/assets/jquery-ui.css">
 	<script src="/assets/jquery-ui.js"></script>
+	<script src="/assets/distLogo.js"></script>
 	<style>
+		label {
+			font-size: 18px;
+		}
+
+		legend {
+			font-size: 18px;
+		}
+
+		#modal-body2 {
+			font-size: 18px;
+		}
+
 		body {
 			display: block;
 			color: rgba(255, 255, 255, .9);
 			text-decoration: none;
 			padding: 1rem;
-			font-size: 1rem;
+			font-size: 18px;
 			border-top: 2px solid transparent;
 			border-bottom: 2px solid transparent;
 		}
 
-		button {
-			background-color: #565051;
-			border: none;
-			color: white;
-			padding: 15px 32px;
-			text-align: center;
-			text-decoration: none;
-			display: inline-block;
-			font-size: 16px;
+		#functionlist {
+			font-size: 18px;
 		}
 
 		#nodelist {
 			font-size: 18px;
 		}
 
-		#windowfont {
-			font-size: 18px;
-		}
-
-		#modal-body2 {
-			font-size: 18px;
+		button {
+			background-color: #565051;
+			border: none;
+			color: white;
+			padding: 5px 5px;
+			text-align: center;
+			text-decoration: none;
+			display: inline-block;
+			font-size: 16px;
 		}
 
 		.modal {
@@ -56,10 +65,10 @@
 			position: relative;
 			background-color: #fefefe;
 			margin: auto;
-			font-size: 12px;
 			padding: 0;
+			font-size: 12px;
 			border: 1px solid #888;
-			width: 75%;
+			width: 90%;
 			box-shadow: 0 4px 8px 0 rgba(0, 0, 0, 0.2), 0 6px 20px 0 rgba(0, 0, 0, 0.19);
 			-webkit-animation-name: animatetop;
 			-webkit-animation-duration: 0.4s;
@@ -116,16 +125,23 @@
 
 		textarea {
 			font-size: 18px;
+			resize: none;
+		}
+
+		input {
+			font-size: 14px;
 		}
 
 		.modal-content2 {
 			position: relative;
 			background-color: #fefefe;
 			margin: auto;
-			font-size: 12px;
 			padding: 0;
+			font-size: 12px;
 			border: 1px solid #888;
-			width: 60%;
+			width: 70%;
+			height: 70%;
+			overflow: auto;
 			box-shadow: 0 4px 8px 0 rgba(0, 0, 0, 0.2), 0 6px 20px 0 rgba(0, 0, 0, 0.19);
 			-webkit-animation-name: animatetop;
 			-webkit-animation-duration: 0.4s;
@@ -134,42 +150,57 @@
 		}
 	</style>
 	<script>
-		function exec() {
-			var e = document.getElementById("nodelist");
-			var nodes = document.getElementsByName('hostlist');
-			var path = '/addcontainer';
-			var host = e.options[e.selectedIndex].value;
-			var container = $("#container_name").val();
-			var container_args = $("#container_args").val();
-			var heartbeat_args = $("#heartbeat_args").val();
-			var failover_constraints = '';
+		var option = '';
 
-			nodes.forEach(function(node, i) {
-				if (nodes[i].checked) {
-					if (failover_constraints) {
-						failover_constraints += ',' + node.value;
-					} else {
-						failover_constraints += node.value;
+		function get_functions() {
+			if (parent.manage_function && parent.manage_function_uuid) {
+				option = '<option value="' + parent.manage_function_uuid + '">' + parent.manage_function + '</option>';
+				$('#functionlist').append(option);
+				parent.manage_function = '';
+				parent.manage_function_uuid = '';
+			} else {
+				$.get("/nodes?token=" + parent.token, function(data) {
+					for (var i in data.functions.name) {
+						if (data.functions.name[i].name) {
+							option += '<option value="' + data.functions.name[i].uuid + '">' + data.functions.name[i].name + '</option>';
+						}
 					}
-				}
-			});
-
-			if (!failover_constraints) {
-				failover_constraints = 'none';
+					$('#functionlist').append(option);
+				});
 			}
-
-			$.post(path, {
-				token: parent.token,
-				container: container,
-				host: host,
-				container_args: container_args,
-				heartbeat_args: heartbeat_args,
-				failover_constraints: container + ',' + failover_constraints
-			}, function(data) {
-				var div = document.getElementById('modal-body2');
-				div.innerHTML = '<label id="windowfont"> Sent request to the server. Please check the logs and running containers for updated information.<br><br>\n' + data;
-			});
 		}
+
+		function exec() {
+			var e = document.getElementById("functionlist");
+			var get_function = '';
+			if (e.options[e.selectedIndex]) {
+				get_function = e.options[e.selectedIndex].value;
+			}
+			var command = '';
+
+			document.getElementById("textarea").value = 'Fetching.....';
+			document.getElementById("url").value = 'Fetching.....';
+
+			if (get_function.length > 1) {
+				$.get("/nodes?token=" + parent.token, function(data) {
+					for (var i in data.functions.name) {
+						if (data.functions.name[i].name.indexOf(get_function) > -1) {
+							if (data.functions.name[i].name && data.functions.name[i].output) {
+								document.getElementById("textarea").value = data.functions.name[i].output;
+								document.getElementById("url").value = 'curl \"' + data.function_server + '?token=' + parent.token + '&uuid=' + data.functions.name[i].uuid + '\"';
+							} else {
+								document.getElementById("textarea").value = 'No output or function already removed.';
+								document.getElementById("url").value = 'No output or function already removed.';
+							}
+						}
+					}
+				});
+			} else {
+				alert('Error, you did not select a function.')
+				output_modal.style.display = "none";
+				modal.style.display = "block";
+			}
+		};
 	</script>
 </head>
 
@@ -178,49 +209,47 @@
 		<div class="modal-content">
 			<div class="modal-header">
 				<span class="close">&times;</span>
-				<h2>Add a container to PiCluster</h2>
+				<h2>View Functions</h2>
 			</div>
 			<div class="modal-body">
 				<p align=left>
-					<label id="windowfont">This will add a new container to the PiCluster configuration file.
-					<br><br> Please ensure that the Dockerfile's are already on the node in the correct location.</label>
-					<br><br>
-					<label id="windowfont" for="nodelist"><b>Select a Node</b></label>
-					<select name="nodelist" id="nodelist">
+					<fieldset name="functions" id="functions">
+						<legend>Select a Function</legend>
+						<table style="width:100%">
+							<tr>
+								<select name="functionlist" id="functionlist">
+							</select>
+							</tr>
+							<tr>
+								&nbsp;
+							</tr>
+							<tr>
+								<button id="myBtn">View</button>
+							</tr>
+						</table>
+					</fieldset>
+					<fieldset name="options" id="options">
+						<legend>Function Data</legend>
 						</select>
-					<br><br>
-					<b><label id="windowfont">Container Name:</b></label>
-					<input type="text" size="15" id="container_name" name="container_name" value=""></font>
-					<br><br>
-					<b><label id="windowfont">Container Arguments:</label></b>
-					<input type="text" size="25" id="container_args" name="container_args" value=""></font>
-					<br><br>
-					<br><b><label id="windowfont">Heartbeat and Host Failover: (Optional)</label></b>
-					<fieldset name="hostList" id="hostList">
-						<b><label id="windowfont">Heartbeat Port:</label></b>
-						<input type="text" size="5" id="heartbeat_args" name="heartbeat_args" value=""></font>
+						<label>Data Retrieval</label>
+						<input type="text" size="80" id="url" name="url" value=""></font>
 						<br><br>
-						<b><label id="windowfont">Host Failover Constraints (Optional):</label></b>
-						<br><br>
+						<label><i>If you execute the above command on your computer, you will not be able to see the output</i></label>
+						<br>
+						<label><i>here anymore because the function will be removed.</i></label>
+						<br>
+						<br>
+						<legend>Function Data</legend>
+						<textarea id="textarea" rows="15" cols="74">
+						</textarea>
 					</fieldset>
 					<p align=center>
-						<button id="myBtn">Submit</button>
 					</p>
 					<script>
-						$(function() {
-							var option = '';
-							var checkbox = '';
-							$.get("/nodes?token=" + parent.token, function(data) {
-								for (var i in data.nodes) {
-									option += '<option value="' + data.nodes[i] + '">' + data.nodes[i] + '</option>';
-									checkbox += '<label id="windowfont" for="hostlist">' + data.nodes[i] + '</label><input type="checkbox" name="hostlist" value="' + data.nodes[i] + '" />&nbsp;&nbsp;&nbsp;&nbsp;';
-								}
-								option += '<option value="' + '*' + '">' + '*' + '</option>';
-								$('#nodelist').append(option);
-								$('#hostList').append(checkbox);
-							});
-						});
+						get_functions();
 					</script>
+				</p>
+
 			</div>
 		</div>
 	</div>
@@ -255,12 +284,10 @@
 		}
 
 		btn.onclick = function() {
-			modal.style.display = "none";
-			output_modal.style.display = "block";
 			exec();
 		}
+
 		modal.style.display = "block";
 	</script>
-	</p>
 
 </html>

@@ -1,17 +1,11 @@
-Version 2.1
+# Version 2.2
 
-New Features:
-Can now build fresh Docker images without using the cache.
-Ability to delete images from the Web Console.
-When a container is added, it will be automatically built and started.
-Can now upload a zip containing the Dockerfile and required files for a container.
-The zip archive will be copied to each machine and extracted.
-A percentage of running containers is displayed on the main screen.
+## New Features:
+* Functions-as-a-Service
 
-Enhancements:
-Container Display: Can click on a running container to manage it.
-Image Display: Can click on a image to manage it.
-"Run Again" button has been added back to the PiCluster Run command window.
+## Enhancements:
+* Cleaner Code
 
-Bug Fixes:
-Scrolling fixed in manage containers.
+## Bug Fixes:
+* Rsyslog - Displays date correctly when clicking on 'Today'
+* Fixed bug with VIP management to delete and create IP's correctly.

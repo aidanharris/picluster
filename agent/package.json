@@ -1,14 +1,20 @@
 {
   "name": "picluster-agent",
   "version": "0.0.1",
+  "config": {
+    "unsafe-perm":true
+  },
   "dependencies": {
     "async": "^2.5.0",
     "body-parser": "latest",
     "child-process-promise": "",
     "cpu-stats": "^1.0.0",
+    "diskspace": "^2.0.0",
     "express": "^4.15.3",
+    "fd-diskspace": "^1.0.0",
     "fs": "",
     "line-reader": "",
+    "mem-stat": "^1.0.5",
     "multer": "^1.3.0",
     "node-gyp": "",
     "os": "",
@@ -16,6 +22,7 @@
     "request": "",
     "request-debug": "",
     "sys": "",
+    "systeminformation": "^3.25.1",
     "unzip": "^0.1.11"
   }
 }

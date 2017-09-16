@@ -1,15 +1,18 @@
-/* eslint "no-warning-comments": [1, { "terms": ["todo","fixme"] }] */
 const http = require('http');
+const https = require('https');
 const fs = require('fs');
 const net = require('net');
+const tls = require('tls');
 const bodyParser = require('body-parser');
-
+const multer = require('multer');
 const express = require('express');
 const dateTime = require('node-datetime');
 const request = require('request');
 
-const app = express();
-
+const functions = {
+  name: []
+};
+let total_nodes = 0;
 let config;
 let config_file;
 if (process.env.PICLUSTER_CONFIG) {
@@ -19,24 +22,28 @@ if (process.env.PICLUSTER_CONFIG) {
   config = JSON.parse(fs.readFileSync('../config.json', 'utf8'));
   config_file = '../config.json';
 }
-const port = config.server_port;
-const agentPort = config.agent_port;
+
+if (config.ssl_self_signed) {
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+}
+
+const app = express();
 
 app.use(bodyParser());
-// Require('request-debug')(request);
-const server = http.createServer(app);
-
-let log = '';
-let token = config.token;
-let dockerFolder = config.docker;
-const container_faillog = [];
-let running_containers = 0;
-let total_containers = 0;
-const multer = require('multer');
 
 const upload = multer({
   dest: '../'
 });
+const scheme = config.ssl ? 'https://' : 'http://';
+const ssl_self_signed = config.ssl_self_signed === false;
+const server = config.web_connect;
+const rsyslog_host = config.rsyslog_host;
+const server_port = config.server_port;
+const agent_port = config.agent_port;
+let log = '';
+let token = config.token;
+let dockerFolder = config.docker;
+const container_faillog = [];
 
 if (config.elasticsearch && config.elasticsearch_index) {
   const mapping = {
@@ -80,6 +87,7 @@ if (config.elasticsearch && config.elasticsearch_index) {
     }
   });
 }
+
 if (config.automatic_heartbeat) {
   if (config.automatic_heartbeat.indexOf('enabled') > -1) {
     if (config.heartbeat_interval) {
@@ -99,11 +107,11 @@ function automatic_heartbeat() {
   if (config.automatic_heartbeat.indexOf('enabled') > -1) {
     setTimeout(() => {
       const options = {
-        host: '127.0.0.1',
-        path: '/hb?token=' + token,
-        port
+        url: `${scheme}${server}:${server_port}/hb?token=${token}`,
+        rejectUnauthorized: ssl_self_signed
       };
-      http.get(options).on('error', e => {
+
+      request.get(options).on('error', e => {
         console.error(e);
       });
       automatic_heartbeat();
@@ -113,110 +121,108 @@ function automatic_heartbeat() {
   }
 }
 
-function containerDetails() {
-  setTimeout(() => {
-    total_containers = 0;
-    running_containers = 0;
-    Object.keys(config.layout).forEach((get_node, i) => {
-      Object.keys(config.layout[i]).forEach(key => {
-        if ((!config.layout[i].hasOwnProperty(key) || key.indexOf('node') > -1)) {
-          return;
-        }
-        total_containers++;
-      });
+app.get('/clear-functions', (req, res) => {
+  const check_token = req.query.token;
+  if ((check_token !== token) || (!check_token)) {
+    res.end('\nError: Invalid Credentials');
+  } else {
+    Object.keys(functions.name).forEach((get_name, i) => {
+      delete_function(functions.name[i].name, functions.name[i].host);
+      remove_function_data(functions.name[i].uuid);
     });
+    res.end('Sent request to remove stale functions.');
+  }
+});
 
-    Object.keys(config.layout).forEach((get_node, i) => {
-      Object.keys(config.layout[i]).forEach(key => {
-        const node = config.layout[i].node;
-        if (!config.layout[i].hasOwnProperty(key)) {
-          return;
-        }
+app.post('/function', (req, res) => {
+  const check_token = req.body.token;
+  const output = req.body.output;
+  const uuid = req.body.uuid;
 
-        if (key.indexOf('node') > -1) {
-          const command = JSON.stringify({
-            command: 'docker ps -q | wc -l',
-            token
-          });
-
-          const options = {
-            url: 'http://' + node + ':' + agentPort + '/run',
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Content-Length': command.length
-            },
-            body: command
-          };
-
-          request(options, (error, response, body) => {
-            if (error) {
-              console.log('An error has occurred.');
-            } else {
-              const check_value = JSON.parse(body).output.toString();
-              const found = check_value.replace(/ /g, '');
-              running_containers += parseInt(found);
-            }
-          });
-        }
-      });
+  if ((check_token !== token) || (!check_token) || (!uuid)) {
+    res.end('\nError: Invalid Credentials or missing parameters.');
+  } else {
+    Object.keys(functions.name).forEach((get_name, i) => {
+      if (functions.name[i].uuid.toString().indexOf(uuid.toString()) > -1) {
+        functions.name[i].output = output;
+        delete_function(functions.name[i].name, functions.name[i].host);
+        res.end('');
+      }
     });
-    containerDetails();
-  }, 15000);
+  }
+});
+
+app.get('/function', (req, res) => {
+  const check_token = req.query.token;
+  const name = req.query.function;
+  const min = 1;
+  const max = 9999999;
+  const uuid = Math.floor(Math.random() * (max - min + 1)) + min;
+  const min_node = 0;
+  const max_node = total_nodes - 1;
+  const node_number = Math.floor(Math.random() * (max_node - min_node + 1)) + min_node;
+  const host = config.layout[node_number].node;
+  const container_args = req.query.container_args;
+
+  const function_data = {
+    uuid,
+    name: name + '-' + uuid,
+    output: '',
+    host
+  };
+
+  if ((check_token !== token) || (!check_token) || (!name)) {
+    res.end('\nError: Invalid Credentials or parameters.');
+  } else {
+    functions.name.push(function_data);
+    create_function(name + '-' + uuid, uuid, host, container_args);
+    res.end(scheme + server + ':' + server_port + '/getfunction?token=' + token + '&uuid=' + uuid);
+  }
+});
+
+function remove_function_data(uuid) {
+  Object.keys(functions.name).forEach((get_name, i) => {
+    if (functions.name[i].uuid.toString().indexOf(uuid.toString()) > -1) {
+      functions.name[i].name = '';
+      functions.name[i].output = '';
+      functions.name[i].uuid = '';
+      functions.name[i].host = '';
+    }
+  });
 }
 
-app.get('/status-count', (req, res) => {
+app.get('/getfunction', (req, res) => {
   const check_token = req.query.token;
-  const data = JSON.stringify({
-    total_containers,
-    running_containers
-  });
+  const uuid = req.query.uuid;
+  let output = '';
 
-  if ((check_token !== token) || (!check_token)) {
-    res.end('\nError: Invalid Credentials');
+  if ((check_token !== token) || (!check_token) || (!uuid)) {
+    res.end('\nError: Invalid Credentials or parameters.');
   } else {
-    res.end(data);
-  }
-});
-
-app.get('/status', (req, res) => {
-  const check_token = req.query.token;
-  if ((check_token !== token) || (!check_token)) {
-    res.end('\nError: Invalid Credentials');
-  } else {
-    const command = JSON.stringify({
-      command: 'hostname;docker container ps;node -e \'const getos = require("picluster-getos");getos(function(e,os){var dist = (e) ? "" : os.dist || os.os;console.log("Dist: " + dist);})\'',
-      token
+    Object.keys(functions.name).forEach((get_name, i) => {
+      if ((functions.name[i].uuid.toString().indexOf(uuid.toString()) > -1 && functions.name[i].output.length > 1)) {
+        output = functions.name[i].output;
+        remove_function_data(uuid);
+      }
     });
-    for (let i = 0; i < config.layout.length; i++) {
-      const node = config.layout[i].node;
-
-      // Runs a command on each node
-      const options = {
-        url: 'http://' + node + ':' + agentPort + '/run',
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Content-Length': command.length
-        },
-        body: command
-      };
-
-      request(options, (error, response) => {
-        if (error) {
-          res.end('An error has occurred.');
-        } else {
-          const results = JSON.parse(response.body);
-          addLog('\nNode: ' + results.output);
-        }
-      });
-    }
-    res.end('');
+    res.end(output);
   }
 });
+
+function create_function(name, uuid, host, user_container_args) {
+  let container_args = '-e UUID=' + uuid + ' -e TOKEN=' + token + ' -e SERVER=' + scheme + server + ':' + server_port;
+  const container = name;
+
+  if (user_container_args) {
+    container_args = user_container_args + ' ' + container_args;
+  }
+
+  migrate(container, host, host, container_args, uuid);
+}
 
 app.get('/clearlog', (req, res) => {
   const check_token = req.query.token;
+
   if ((check_token !== token) || (!check_token)) {
     res.end('\nError: Invalid Credentials');
   } else {
@@ -226,74 +232,78 @@ app.get('/clearlog', (req, res) => {
 });
 
 app.get('/nodes', (req, res) => {
-  const check_token = req.query.token;
-  if ((check_token !== token) || (!check_token)) {
-    res.end('\nError: Invalid Credentials');
-  } else {
-    const command = JSON.stringify({
-      command: 'hostname;echo;uname -a;df -h /;node -e \'const getos = require("picluster-getos");getos(function(e,os){var dist = (e) ? "" : os.dist || os.os;console.log("Dist: " + dist);})\';node -e \'require("cpu-stats")(1000, (error, result) => { let usage = 0; result.forEach(e => { usage += e.cpu; });console.log(usage); });\'',
-      token
-    });
-    for (let i = 0; i < config.layout.length; i++) {
-      const node = config.layout[i].node;
+  const node_metrics = {
+    data: [],
+    functions,
+    function_server: `${scheme}${server}:${server_port}/getfunction`
+  };
 
-      // Runs a command on each node
-      const options = {
-        url: 'http://' + node + ':' + agentPort + '/run',
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Content-Length': command.length
-        },
-        body: command
-      };
-
-      request(options, (error, response) => {
-        if (error) {
-          res.end(error);
-        } else {
-          const results = JSON.parse(response.body);
-          addLog('Node: ' + results.output);
-        }
-      });
-    }
-    res.end('');
+  function addData(data) {
+    node_metrics.data.push(data);
   }
-});
 
-app.get('/images', (req, res) => {
+  function getData() {
+    let total_node_count = 0;
+    let total_containers = 0;
+    const node_list = [];
+    const container_list = [];
+
+    for (let i = 0; i < config.layout.length; i++) {
+      for (const key in config.layout[i]) {
+        if (config.layout[i].hasOwnProperty(key)) {
+          const node = config.layout[i].node;
+          const node_info = config.layout[i][key];
+          if (node_info === node) {
+            total_node_count++;
+            node_list.push(node);
+          } else {
+            total_containers++;
+            container_list.push(key);
+          }
+        }
+      }
+    }
+
+    node_metrics.total_containers = total_containers;
+    node_metrics.total_nodes = total_node_count;
+    node_metrics.container_list = container_list;
+    node_metrics.nodes = node_list;
+    total_nodes = total_node_count;
+    return node_metrics;
+  }
+
   const check_token = req.query.token;
   if ((check_token !== token) || (!check_token)) {
     res.end('\nError: Invalid Credentials');
   } else {
-    const command = JSON.stringify({
-      command: 'hostname;docker image list;node -e \'const getos = require("picluster-getos");getos(function(e,os){var dist = (e) ? "" : os.dist || os.os;console.log("Dist: " + dist);})\';',
-      token
-    });
-    for (let i = 0; i < config.layout.length; i++) {
-      const node = config.layout[i].node;
+    config.layout.forEach(get_node => {
+      const node = get_node.node;
 
-      // Runs a command on each node
+      if (!node) {
+        console.error('Invalid Config for node', get_node);
+        return;
+      }
+
       const options = {
-        url: 'http://' + node + ':' + agentPort + '/run',
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Content-Length': command.length
-        },
-        body: command
+        url: `${scheme}${node}:${agent_port}/node-status?token=${token}`,
+        rejectUnauthorized: ssl_self_signed,
+        method: 'GET'
       };
 
       request(options, (error, response) => {
         if (error) {
-          res.end('An error has occurred.');
+          console.error(error);
         } else {
-          const results = JSON.parse(response.body);
-          addLog('\nNode: ' + results.output);
+          const check = JSON.parse(response.body);
+          if (check.cpu_percent > 0) {
+            addData(check);
+          }
         }
       });
-    }
-    res.end('');
+    });
+    setTimeout(() => {
+      res.json(getData());
+    }, 3000);
   }
 });
 
@@ -305,6 +315,7 @@ app.get('/build', (req, res) => {
   const check_token = req.query.token;
   const no_cache = req.query.no_cache;
   let image = '';
+
   if (req.query.image) {
     image = req.query.image;
   }
@@ -319,10 +330,12 @@ app.get('/build', (req, res) => {
     Object.keys(config.layout).forEach((get_node, i) => {
       Object.keys(config.layout[i]).forEach(key => {
         const node = config.layout[i].node;
+        let command;
+
         if ((!config.layout[i].hasOwnProperty(key) || key.indexOf('node') > -1)) {
           return;
         }
-        let command;
+
         if (no_cache.indexOf('true') > -1) {
           command = JSON.stringify({
             command: 'docker image build --no-cache ' + dockerFolder + '/' + key + ' -t ' + key + ' -f ' + dockerFolder + '/' + key + '/Dockerfile',
@@ -336,7 +349,8 @@ app.get('/build', (req, res) => {
         }
 
         const options = {
-          url: 'http://' + node + ':' + agentPort + '/run',
+          url: `${scheme}${node}:${agent_port}/run`,
+          rejectUnauthorized: ssl_self_signed,
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -364,6 +378,7 @@ app.get('/build', (req, res) => {
 app.get('/delete-image', (req, res) => {
   const check_token = req.query.token;
   let image = '';
+
   if (req.query.image) {
     image = req.query.image;
   }
@@ -378,16 +393,19 @@ app.get('/delete-image', (req, res) => {
     Object.keys(config.layout).forEach((get_node, i) => {
       Object.keys(config.layout[i]).forEach(key => {
         const node = config.layout[i].node;
+
         if ((!config.layout[i].hasOwnProperty(key) || key.indexOf('node') > -1)) {
           return;
         }
+
         const command = JSON.stringify({
           command: 'docker image rm ' + key,
           token
         });
 
         const options = {
-          url: 'http://' + node + ':' + agentPort + '/run',
+          url: `${scheme}${node}:${agent_port}/`,
+          rejectUnauthorized: ssl_self_signed,
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -427,46 +445,38 @@ app.get('/create', (req, res) => {
   if ((check_token !== token) || (!check_token)) {
     res.end('\nError: Invalid Credentials');
   } else {
-    let responseString = '';
     Object.keys(config.layout).forEach((get_node, i) => {
       Object.keys(config.layout[i]).forEach(key => {
         const node = config.layout[i].node;
+
         if ((!config.layout[i].hasOwnProperty(key) || key.indexOf('node') > -1)) {
           return;
         }
+
         const command = JSON.stringify({
           command: 'docker container run -d --name ' + key + ' ' + config.layout[i][key] + ' ' + key,
           token
         });
 
         const options = {
-          hostname: node,
-          port: agentPort,
-          path: '/run',
+          url: `${scheme}${node}:${agent_port}/run`,
+          rejectUnauthorized: ssl_self_signed,
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'Content-Length': command.length
-          }
+          },
+          body: command
         };
 
         if ((key.indexOf(container) > -1) || (container.indexOf('*')) > -1) {
-          const request = http.request(options, response => {
-            response.on('data', data => {
-              responseString += data;
-            });
-            response.on('end', () => {
-              if (responseString.body) {
-                const body = responseString.body;
-                const results = JSON.parse(body.toString('utf8'));
-                addLog(results.output);
-              }
-            });
-          }).on('error', e => {
-            console.error(e);
+          request(options, (error, response) => {
+            if (error) {
+              console.log(error);
+            } else {
+              addLog(response.body);
+            }
           });
-          request.write(command);
-          req.end();
         }
       });
     });
@@ -477,9 +487,11 @@ app.get('/create', (req, res) => {
 app.get('/start', (req, res) => {
   const check_token = req.query.token;
   let container = '';
+
   if (req.query.container) {
     container = req.query.container;
   }
+
   if (container.indexOf('*') > -1) {
     container = '*';
   }
@@ -490,15 +502,19 @@ app.get('/start', (req, res) => {
     Object.keys(config.layout).forEach((get_node, i) => {
       Object.keys(config.layout[i]).forEach(key => {
         const node = config.layout[i].node;
+
         if ((!config.layout[i].hasOwnProperty(key) || key.indexOf('node') > -1)) {
           return;
         }
+
         const command = JSON.stringify({
           command: 'docker container start ' + key,
           token
         });
+
         const options = {
-          url: 'http://' + node + ':' + agentPort + '/run',
+          url: `${scheme}${node}:${agent_port}/run`,
+          rejectUnauthorized: ssl_self_signed,
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -506,6 +522,7 @@ app.get('/start', (req, res) => {
           },
           body: command
         };
+
         if ((container.indexOf('*') > -1) || key.indexOf(container) > -1) {
           request(options, (error, response) => {
             if (error) {
@@ -522,20 +539,24 @@ app.get('/start', (req, res) => {
   }
 });
 
-function migrate(container, original_host, new_host, original_container_data) {
+function migrate(container, original_host, new_host, original_container_data, uuid) {
   let existing_automatic_heartbeat_value = '';
+
   if (config.automatic_heartbeat) {
     existing_automatic_heartbeat_value = config.automatic_heartbeat;
     if (config.automatic_heartbeat.indexOf('enabled') > -1) {
       config.automatic_heartbeat = 'disabled';
     }
   }
+
   const command = JSON.stringify({
-    command: 'docker rm -f ' + container,
+    command: 'docker container rm -f ' + container,
     token
   });
+
   const options = {
-    url: 'http://' + original_host + ':' + agentPort + '/run',
+    url: `${scheme}${original_host}:${agent_port}/run`,
+    rejectUnauthorized: ssl_self_signed,
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -548,13 +569,23 @@ function migrate(container, original_host, new_host, original_container_data) {
     if (error) {
       addLog('An error has occurred.');
     } else {
-      const command = JSON.stringify({
-        command: `docker image build ${dockerFolder}/${container} -t ${container} -f ${dockerFolder}/${container}/Dockerfile;docker container run -d --name ${container} ${original_container_data} ${container}`,
-        token
-      });
+      let command = '';
+      if (uuid) {
+        const image_name = container.split('-' + uuid)[0];
+        command = JSON.stringify({
+          command: 'docker image build ' + dockerFolder + '/' + image_name + ' -t ' + image_name + ' -f ' + dockerFolder + '/' + image_name + '/Dockerfile;docker container run -d --name ' + container + ' ' + original_container_data + ' ' + image_name,
+          token
+        });
+      } else {
+        command = JSON.stringify({
+          command: `docker image build ${dockerFolder}/${container} -t ${container} -f ${dockerFolder}/${container}/Dockerfile;docker container run -d --name ${container} ${original_container_data} ${container}`,
+          token
+        });
+      }
 
       const options = {
-        url: 'http://' + new_host + ':' + agentPort + '/run',
+        url: `${scheme}${new_host}:${agent_port}/run`,
+        rejectUnauthorized: ssl_self_signed,
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -566,33 +597,11 @@ function migrate(container, original_host, new_host, original_container_data) {
       request(options, error => {
         if (error) {
           addLog('An error has occurred.');
-        } else {
-          const command = JSON.stringify({
-            command: 'docker container run -d --name ' + container + ' ' + original_container_data + ' ' + container,
-            token
-          });
-
-          const options = {
-            url: 'http://' + new_host + ':' + agentPort + '/run',
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Content-Length': command.length
-            },
-            body: command
-          };
-          request(options, error => {
-            if (error) {
-              addLog('An error has occurred.');
-            } else {
-              addLog('\nStarting ' + container);
-              if (config.automatic_heartbeat) {
-                if (existing_automatic_heartbeat_value.indexOf('enabled') > -1) {
-                  config.automatic_heartbeat = existing_automatic_heartbeat_value;
-                }
-              }
-            }
-          });
+        }
+        if (config.automatic_heartbeat) {
+          if (existing_automatic_heartbeat_value.indexOf('enabled') > -1) {
+            config.automatic_heartbeat = existing_automatic_heartbeat_value;
+          }
         }
       });
     }
@@ -608,17 +617,12 @@ app.get('/addhost', (req, res) => {
   } else {
     let proceed = 1;
     for (let i = 0; i < config.layout.length; i++) {
-      /* eslint-disable no-unused-vars */
-      for (const key in config.layout[i]) { // FixMe: Why is 'key' unused?
-        if (config.layout[i].node.indexOf(host) > -1) {
-          proceed = 0;
-        }
+      if (config.layout[i].node.indexOf(host) > -1) {
+        proceed = 0;
       }
-      /* eslint-enable no-unused-vars */
     }
 
     if (proceed) {
-      // Add New Host
       config.layout.push({
         node: host
       });
@@ -634,9 +638,9 @@ app.get('/addhost', (req, res) => {
         token
       });
 
-      // Save Configuration
       const options = {
-        url: `http://127.0.0.1:${port}/updateconfig`,
+        url: `${scheme}${server}:${server_port}/updateconfig`,
+        rejectUnauthorized: ssl_self_signed,
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -693,7 +697,6 @@ app.get('/clear-elasticsearch', (req, res) => {
       query: {
         match_all: {}
       }
-
     };
 
     const options = {
@@ -721,47 +724,40 @@ app.get('/clear-elasticsearch', (req, res) => {
 app.get('/rmhost', (req, res) => {
   const check_token = req.query.token;
   const host = req.query.host;
-  let hb_proceed = 0; // FixMe: Should this be a boolean (true or false)?
+  let hb_proceed = 0;
 
   if ((check_token !== token) || (!check_token)) {
     res.end('\nError: Invalid Credentials');
   } else {
     // Ensures that the host exists
     for (let i = 0; i < config.layout.length; i++) {
-      /* eslint-disable no-unused-vars */
-      for (const key in config.layout[i]) { // FixMe: Why is 'key' unused?
-        if (config.layout[i].node.indexOf(host) > -1) {
-          config.layout.splice(i, 1);
-          hb_proceed = 1;
-          break;
-        }
+      if (config.layout[i].node.indexOf(host) > -1) {
+        config.layout.splice(i, 1);
+        hb_proceed = 1;
+        break;
       }
-      /* eslint-enable no-unused-vars */
     }
   }
 
   if (hb_proceed) {
     if (config.hb) {
       for (let i = 0; i < config.hb.length; i++) {
-        /* eslint-disable no-unused-vars */
-        for (const key in config.hb[i]) { // FixMe: Why is 'key' unused?
-          if (config.hb[i].node.indexOf(host) > -1) {
-            config.hb.splice(i, 1);
-            break;
-          }
+        if (config.hb[i].node.indexOf(host) > -1) {
+          config.hb.splice(i, 1);
+          break;
         }
-        /* eslint-enable no-unused-vars */
       }
     }
   }
+
   const new_config = JSON.stringify({
     payload: JSON.stringify(config),
     token
   });
 
-  // Save Configuration
   const options = {
-    url: `http://127.0.0.1:${port}/updateconfig`,
+    url: `${scheme}${server}:${server_port}/updateconfig`,
+    rejectUnauthorized: ssl_self_signed,
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -840,9 +836,9 @@ app.get('/removecontainerconfig', (req, res) => {
       token
     });
 
-    // Save Configuration
     const options = {
-      url: `http://127.0.0.1:${port}/updateconfig`,
+      url: `${scheme}${server}:${server_port}/updateconfig`,
+      rejectUnauthorized: ssl_self_signed,
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -863,53 +859,48 @@ app.get('/removecontainerconfig', (req, res) => {
 
 app.get('/addcontainer', (req, res) => {
   const check_token = req.query.token;
-  const host = req.query.host;
+  let host = req.query.host;
   const container = req.query.container;
   const container_args = req.query.container_args;
   const heartbeat_args = req.query.heartbeat_args;
   const failover_constraints = req.query.failover_constraints;
+
+  if (host.indexOf('*') > -1) {
+    const min = 0;
+    const max = total_nodes - 1;
+    const number = Math.floor(Math.random() * (max - min + 1)) + min;
+    host = config.layout[number].node;
+  }
 
   if ((check_token !== token) || (!check_token)) {
     res.end('\nError: Invalid Credentials');
   } else {
     // Ensures that the host exists
     let proceed = 0;
+
     for (let i = 0; i < config.layout.length; i++) {
-      /* eslint-disable no-unused-vars */
-      for (const key in config.layout[i]) { // FixMe: Why isn't 'key' used?
-        if (config.layout[i].node.indexOf(host) > -1) {
-          proceed++;
-        }
+      if (config.layout[i].node.indexOf(host) > -1) {
+        proceed++;
       }
-      /* eslint-enable no-unused-vars */
     }
 
     if (proceed < 1) {
       res.end('\nError: Node does not exist!');
     } else {
       // Add Data to New Host
-
       for (let i = 0; i < config.layout.length; i++) {
-        /* eslint-disable no-unused-vars */
-        for (const key in config.layout[i]) { // FixMe: Why isn't 'key' used?
-          if (config.layout[i].node.indexOf(host) > -1) {
-            config.layout[i][container] = container_args;
-          }
+        if (config.layout[i].node.indexOf(host) > -1) {
+          config.layout[i][container] = container_args;
         }
-        /* eslint-enable no-unused-vars */
       }
 
       // Adds Heartbeat Data
       if (config.hb) {
         if (heartbeat_args) {
           for (let i = 0; i < config.hb.length; i++) {
-            /* eslint-disable no-unused-vars */
-            for (const key in config.hb[i]) { // FixMe: Why isn't 'key' used?
-              if (config.hb[i].node.indexOf(host) > -1) {
-                config.hb[i][container] = heartbeat_args;
-              }
+            if (config.hb[i].node.indexOf(host) > -1) {
+              config.hb[i][container] = heartbeat_args;
             }
-            /* eslint-enable no-unused-vars */
           }
         }
       }
@@ -921,14 +912,15 @@ app.get('/addcontainer', (req, res) => {
           });
         }
       }
+
       const new_config = JSON.stringify({
         payload: JSON.stringify(config),
         token
       });
 
-      // Save Configuration
       const options = {
-        url: `http://127.0.0.1:${port}/updateconfig`,
+        url: `${scheme}${server}:${server_port}/updateconfig`,
+        rejectUnauthorized: ssl_self_signed,
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -937,12 +929,16 @@ app.get('/addcontainer', (req, res) => {
         body: new_config
       };
 
+      const container_options = {
+        url: `${scheme}${server}:${server_port}/changehost?token=${token}&container=${container}&newhost=${host}`,
+        rejectUnauthorized: ssl_self_signed
+      };
+
       request(options, error => {
         if (error) {
           res.end(error);
         } else {
-          // Res.end('\nAdded ' + container + ' to the configuration.');
-          request(`http://127.0.0.1:${port}/changehost?token=${token}&container=${container}&newhost=${host}`, (error, response) => {
+          request(container_options, (error, response) => {
             if (!error && response.statusCode === 200) {
               res.end('\nAdded ' + container + ' to the configuration.');
             } else {
@@ -987,10 +983,10 @@ app.get('/changehost', (req, res) => {
       }
     }
 
+    // Find Current Host
     if (proceed < 2) {
       res.end('\nError: Node or Container does not exist!');
     } else {
-      // Find Current Host
       for (let i = 0; i < config.layout.length; i++) {
         for (const key in config.layout[i]) {
           if (container.length > 0) {
@@ -1003,8 +999,8 @@ app.get('/changehost', (req, res) => {
         }
       }
 
+      // Checks for HB
       if (config.hb) {
-        // Checks for HB
         for (let i = 0; i < config.hb.length; i++) {
           for (const key in config.hb[i]) {
             if (container.length > 0) {
@@ -1018,26 +1014,18 @@ app.get('/changehost', (req, res) => {
       }
 
       for (let i = 0; i < config.layout.length; i++) {
-        /* eslint-disable no-unused-vars */
-        for (const key in config.layout[i]) { // FixMe: Why isn't 'key' used?
-          if (config.layout[i].node.indexOf(new_host) > -1) {
-            config.layout[i][container] = original_container_data;
-          }
+        if (config.layout[i].node.indexOf(new_host) > -1) {
+          config.layout[i][container] = original_container_data;
         }
-        /* eslint-enable no-unused-vars */
       }
 
       // Adds Heartbeat Data
       if (config.hb) {
         if (original_heartbeat_data) {
           for (let i = 0; i < config.hb.length; i++) {
-            /* eslint-disable no-unused-vars */
-            for (const key in config.hb[i]) { // FixMe: Why isn't 'key' used?
-              if (config.hb[i].node.indexOf(new_host) > -1) {
-                config.hb[i][container] = original_heartbeat_data;
-              }
+            if (config.hb[i].node.indexOf(new_host) > -1) {
+              config.hb[i][container] = original_heartbeat_data;
             }
-            /* eslint-enable no-unused-vars */
           }
         }
       }
@@ -1047,9 +1035,9 @@ app.get('/changehost', (req, res) => {
         token
       });
 
-      // Save Configuration
       const options = {
-        url: `http://127.0.0.1:${port}/updateconfig`,
+        url: `${scheme}${server}:${server_port}/updateconfig`,
+        rejectUnauthorized: ssl_self_signed,
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1073,9 +1061,11 @@ app.get('/changehost', (req, res) => {
 app.get('/stop', (req, res) => {
   const check_token = req.query.token;
   let container = '';
+
   if (req.query.container) {
     container = req.query.container;
   }
+
   if (container.indexOf('*') > -1) {
     container = '*';
   }
@@ -1086,15 +1076,19 @@ app.get('/stop', (req, res) => {
     Object.keys(config.layout).forEach((get_node, i) => {
       Object.keys(config.layout[i]).forEach(key => {
         const node = config.layout[i].node;
+
         if ((!config.layout[i].hasOwnProperty(key) || key.indexOf('node') > -1)) {
           return;
         }
+
         const command = JSON.stringify({
           command: 'docker container stop ' + key,
           token
         });
+
         const options = {
-          url: 'http://' + node + ':' + agentPort + '/run',
+          url: `${scheme}${node}:${agent_port}/run`,
+          rejectUnauthorized: ssl_self_signed,
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -1102,6 +1096,7 @@ app.get('/stop', (req, res) => {
           },
           body: command
         };
+
         if ((container.indexOf('*') > -1) || key.indexOf(container) > -1) {
           request(options, (error, response) => {
             if (error) {
@@ -1118,9 +1113,33 @@ app.get('/stop', (req, res) => {
   }
 });
 
+function delete_function(name, node) {
+  const command = JSON.stringify({
+    command: 'docker container rm -f ' + name,
+    token
+  });
+
+  const options = {
+    url: scheme + node + ':' + agent_port + '/run',
+    rejectUnauthorized: ssl_self_signed,
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Content-Length': command.length
+    },
+    body: command
+  };
+  request(options, error => {
+    if (error) {
+      console.log('\n' + error);
+    }
+  });
+}
+
 app.get('/delete', (req, res) => {
   const check_token = req.query.token;
   let container = '';
+
   if (req.query.container) {
     container = req.query.container;
   }
@@ -1135,16 +1154,18 @@ app.get('/delete', (req, res) => {
     Object.keys(config.layout).forEach((get_node, i) => {
       Object.keys(config.layout[i]).forEach(key => {
         const node = config.layout[i].node;
+
         if ((!config.layout[i].hasOwnProperty(key) || key.indexOf('node') > -1)) {
           return;
         }
-
         const command = JSON.stringify({
           command: 'docker container rm -f ' + key,
           token
         });
+
         const options = {
-          url: `http://${node}:${agentPort}/run`,
+          url: `${scheme}${node}:${agent_port}/run`,
+          rejectUnauthorized: ssl_self_signed,
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -1159,7 +1180,7 @@ app.get('/delete', (req, res) => {
               res.end('An error has occurred.');
             } else {
               const results = JSON.parse(response.body);
-              addLog('\nStopping: ' + key + '\n' + results.output);
+              addLog('\nDeleting: ' + key + '\n' + results.output);
             }
           });
         }
@@ -1172,9 +1193,11 @@ app.get('/delete', (req, res) => {
 app.get('/restart', (req, res) => {
   const check_token = req.query.token;
   let selected_container = '';
+
   if (req.query.container) {
     selected_container = req.query.container;
   }
+
   if (selected_container.indexOf('*') > -1) {
     selected_container = '*';
   }
@@ -1185,15 +1208,19 @@ app.get('/restart', (req, res) => {
     Object.keys(config.layout).forEach((get_node, i) => {
       Object.keys(config.layout[i]).forEach(key => {
         const node = config.layout[i].node;
+
         if ((!config.layout[i].hasOwnProperty(key) || key.indexOf('node') > -1)) {
           return;
         }
+
         const command = JSON.stringify({
           command: 'docker container restart ' + key,
           token
         });
+
         const options = {
-          url: 'http://' + node + ':' + agentPort + '/run',
+          url: `${scheme}${node}:${agent_port}/run`,
+          rejectUnauthorized: ssl_self_signed,
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -1201,6 +1228,7 @@ app.get('/restart', (req, res) => {
           },
           body: command
         };
+
         if ((selected_container.indexOf('*') > -1) || key.indexOf(selected_container) > -1) {
           request(options, (error, response) => {
             if (error) {
@@ -1220,9 +1248,11 @@ app.get('/restart', (req, res) => {
 app.get('/containerlog', (req, res) => {
   const check_token = req.query.token;
   let selected_container = '';
+
   if (req.query.container) {
     selected_container = req.query.container;
   }
+
   if (selected_container.indexOf('*') > -1) {
     selected_container = '*';
   }
@@ -1233,6 +1263,7 @@ app.get('/containerlog', (req, res) => {
     Object.keys(config.layout).forEach((get_node, i) => {
       Object.keys(config.layout[i]).forEach(key => {
         const node = config.layout[i].node;
+
         if ((!config.layout[i].hasOwnProperty(key) || key.indexOf('node') > -1)) {
           return;
         }
@@ -1241,8 +1272,10 @@ app.get('/containerlog', (req, res) => {
           command: 'docker container logs ' + key,
           token
         });
+
         const options = {
-          url: 'http://' + node + ':' + agentPort + '/run',
+          url: `${scheme}${node}:${agent_port}/run`,
+          rejectUnauthorized: ssl_self_signed,
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -1250,6 +1283,7 @@ app.get('/containerlog', (req, res) => {
           },
           body: command
         };
+
         if ((selected_container.indexOf('*') > -1) || key.indexOf(selected_container) > -1) {
           request(options, (error, response) => {
             if (error) {
@@ -1271,6 +1305,7 @@ app.post('/listcontainers', (req, res) => {
   const check_token = req.body.token;
   const output = [];
   let container;
+
   if ((check_token !== token) || (!check_token)) {
     res.end('\nError: Invalid Credentials');
   } else {
@@ -1294,6 +1329,7 @@ app.post('/listnodes', (req, res) => {
   const check_token = req.body.token;
   const output = [];
   let node;
+
   if ((check_token !== token) || (!check_token)) {
     res.end('\nError: Invalid Credentials');
   } else {
@@ -1316,6 +1352,7 @@ function copyToAgents(file) {
   Object.keys(config.layout).forEach((get_node, i) => {
     Object.keys(config.layout[i]).forEach(key => {
       const node = config.layout[i].node;
+
       if ((!config.layout[i].hasOwnProperty(key) || key.indexOf('node') > -1)) {
         return;
       }
@@ -1326,10 +1363,13 @@ function copyToAgents(file) {
         file: fs.createReadStream(file)
       };
 
-      request.post({
-        url: 'http://' + node + ':' + agentPort + '/receive-file',
+      const form_options = {
+        url: `${scheme}${node}:${agent_port}/receive-file`,
+        rejectUnauthorized: ssl_self_signed,
         formData
-      }, err => {
+      };
+
+      request.post(form_options, err => {
         if (!err) {
           addLog('\nCopied ' + file + ' to ' + node);
           console.log('\nCopied ' + file + ' to ' + node);
@@ -1341,27 +1381,29 @@ function copyToAgents(file) {
 
 app.post('/receive-file', upload.single('file'), (req, res) => {
   const check_token = req.body.token;
+
   if ((check_token !== token) || (!check_token)) {
     res.end('\nError: Invalid Credentials');
   } else {
-    /* eslint-disable handle-callback-err */
-    fs.readFile(req.file.path, (err, data) => { // FixMe: We should handle an error here...
-      const newPath = '../' + req.file.originalname;
-      /* eslint-disable no-unused-vars */
-      /* eslint-disable handle-callback-err */
-      fs.writeFile(newPath, data, err => { // FixMe: We should handle an error here...
-        copyToAgents(newPath);
-      });
-      /* eslint-enable no-unused-vars */
-      /* eslint-enable handle-callback-err */
+    fs.readFile(req.file.path, (err, data) => {
+      if (data) {
+        const newPath = '../' + req.file.originalname;
+        fs.writeFile(newPath, data, err => {
+          if (err) {
+            console.log(err);
+          } else {
+            copyToAgents(newPath);
+          }
+        });
+      }
     });
-    /* eslint-enable handle-callback-err */
     res.end('');
   }
 });
 
 app.post('/listcommands', (req, res) => {
   const check_token = req.body.token;
+
   if ((check_token !== token) || (!check_token)) {
     res.end('\nError: Invalid Credentials');
   } else if (config.commandlist) {
@@ -1374,6 +1416,7 @@ app.post('/listcommands', (req, res) => {
 app.post('/exec', (req, res) => {
   const check_token = req.body.token;
   let selected_node = '';
+
   if (req.body.node) {
     selected_node = req.body.node;
   }
@@ -1394,7 +1437,8 @@ app.post('/exec', (req, res) => {
       const node = config.layout[i].node;
 
       const options = {
-        url: 'http://' + node + ':' + agentPort + '/run',
+        url: `${scheme}${node}:${agent_port}/run`,
+        rejectUnauthorized: ssl_self_signed,
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1413,6 +1457,7 @@ app.post('/exec', (req, res) => {
           }
         });
       }
+
       if (selected_node.indexOf(node) > -1) {
         request(options, (error, response) => {
           if (error) {
@@ -1430,6 +1475,7 @@ app.post('/exec', (req, res) => {
 
 app.get('/prune', (req, res) => {
   const check_token = req.query.token;
+
   if ((check_token !== token) || (!check_token)) {
     res.end('\nError: Invalid Credentials');
   } else {
@@ -1437,11 +1483,13 @@ app.get('/prune', (req, res) => {
       command: 'docker system prune -a -f',
       token
     });
+
     for (let i = 0; i < config.layout.length; i++) {
       const node = config.layout[i].node;
 
       const options = {
-        url: 'http://' + node + ':' + agentPort + '/run',
+        url: `${scheme}${node}:${agent_port}/run`,
+        rejectUnauthorized: ssl_self_signed,
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1459,6 +1507,7 @@ app.get('/prune', (req, res) => {
           console.log('\nNode:' + results.node + '\n' + results.output);
         }
       });
+
       res.end('');
     }
   }
@@ -1467,8 +1516,10 @@ app.get('/prune', (req, res) => {
 function move_container(container, newhost) {
   console.log('\nMigrating container ' + container + ' to ' + newhost + '......');
   addLog('\nMigrating container ' + container + ' to ' + newhost + '......');
+
   const options = {
-    url: `http://127.0.0.1:3000/changehost?token=${token}&container=${container}&newhost=${newhost}`,
+    url: `${scheme}${server}:${server_port}/changehost?token=${token}&container=${container}&newhost=${newhost}`,
+    rejectUnauthorized: ssl_self_signed,
     method: 'GET'
   };
 
@@ -1519,7 +1570,7 @@ function container_failover(container) {
 
 function hb_check(node, container_port, container) {
   if (config.automatic_heartbeat.indexOf('enabled') > -1) {
-    const client = new net.Socket();
+    const client = config.ssl ? new tls.TLSSocket() : new net.Socket();
 
     client.connect(container_port, node, container, () => {});
 
@@ -1530,20 +1581,21 @@ function hb_check(node, container_port, container) {
     client.on('error', () => {
       addLog('\n' + container + ' failed on: ' + node);
       console.log('\n' + container + ' failed on: ' + node);
+
       if (config.container_host_constraints) {
         container_faillog.push(container);
         container_failover(container);
       }
 
       const options = {
-        host: '127.0.0.1',
-        path: '/restart?node=' + node + '&container=' + container + '&token=' + token,
-        port
+        url: `${scheme}${server}:${server_port}/restart?node=${node}&container=${container}&token=${token}`,
+        rejectUnauthorized: ssl_self_signed
       };
 
       http.get(options).on('error', e => {
         console.error(e);
       });
+
       client.destroy();
     });
   }
@@ -1551,18 +1603,21 @@ function hb_check(node, container_port, container) {
 
 app.get('/hb', (req, res) => {
   const check_token = req.query.token;
+
   if ((check_token !== token) || (!check_token)) {
     res.end('\nError: Invalid Credentials');
   } else {
     let node = '';
     let check_port = '';
     let container = '';
+
     for (let i = 0; i < config.hb.length; i++) {
       for (const key in config.hb[i]) {
         if (config.hb[i].hasOwnProperty(key)) {
           container = key;
           node = config.hb[i].node;
           check_port = config.hb[i][key];
+
           if (check_port !== node) {
             hb_check(node, check_port, container);
           }
@@ -1573,14 +1628,9 @@ app.get('/hb', (req, res) => {
   }
 });
 
-/* eslint-disable no-unused-vars */
-function gatherLog(callback) { // FixMe: Why isn't this used anywhere?
-  callback(log);
-}
-/* eslint-enable no-unused-vars */
-
 app.get('/log', (req, res) => {
   const check_token = req.query.token;
+
   if ((check_token !== token) || (!check_token)) {
     res.end('\nError: Invalid Credentials');
   } else {
@@ -1593,10 +1643,16 @@ app.get('/log', (req, res) => {
 
 app.get('/rsyslog', (req, res) => {
   const check_token = req.query.token;
+
   if ((check_token !== token) || (!check_token)) {
     res.end('\nError: Invalid Credentials');
   } else {
-    request(`http://${config.rsyslog_host}:${config.agent_port}/rsyslog?token=${token}`, (error, response, body) => {
+    const options = {
+      url: `${scheme}${rsyslog_host}:${agent_port}/rsyslog?token=${token}`,
+      rejectUnauthorized: ssl_self_signed
+    };
+
+    request(options, (error, response, body) => {
       if (!error && response.statusCode === 200) {
         res.end(body);
       } else {
@@ -1608,6 +1664,7 @@ app.get('/rsyslog', (req, res) => {
 
 app.get('/reloadconfig', (req, res) => {
   const check_token = req.query.token;
+
   if ((check_token !== token) || (!check_token)) {
     res.end('\nError: Invalid Credentials');
   } else {
@@ -1618,6 +1675,14 @@ app.get('/reloadconfig', (req, res) => {
     }
     token = config.token;
     dockerFolder = config.docker;
+
+    if (config.heartbeat_interval && config.automatic_heartbeat) {
+      if (config.automatic_heartbeat.indexOf('enabled') > -1) {
+        console.log('\nEnabing Heartbeat.');
+        automatic_heartbeat();
+      }
+    }
+
     addLog('\nReloading Config.json\n');
     res.end('');
   }
@@ -1625,6 +1690,7 @@ app.get('/reloadconfig', (req, res) => {
 
 app.get('/getconfig', (req, res) => {
   const check_token = req.query.token;
+
   if ((check_token !== token) || (!check_token)) {
     res.end('\nError: Invalid Credentials');
   } else {
@@ -1634,6 +1700,7 @@ app.get('/getconfig', (req, res) => {
 
 app.get('/killvip', (req, res) => {
   const check_token = req.query.token;
+
   if ((check_token !== token) || (!check_token)) {
     res.end('\nError: Invalid Credentials');
   } else {
@@ -1643,15 +1710,18 @@ app.get('/killvip', (req, res) => {
       Object.keys(config.vip).forEach((get_node, i) => {
         Object.keys(config.vip[i]).forEach(key => {
           const node = config.vip[i].node;
+
           if ((!config.vip[i].hasOwnProperty(key) || key.indexOf('node') > -1)) {
             return;
           }
+
           const token_body = JSON.stringify({
             token
           });
 
           const options = {
-            url: 'http://' + node + ':' + agentPort + '/killvip',
+            url: `${scheme}${node}:${agent_port}/killvip`,
+            rejectUnauthorized: ssl_self_signed,
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -1678,10 +1748,12 @@ app.post('/updateconfig', (req, res) => {
 
   try {
     const verify_payload = JSON.parse(req.body.payload);
+
     if ((check_token !== token) || (!check_token)) {
       res.end('\nError: Invalid Credentials');
     } else {
       payload = JSON.stringify(verify_payload, null, 4);
+
       fs.writeFile(config_file, payload, err => {
         if (err) {
           console.log('\nError while writing config.' + err);
@@ -1695,8 +1767,20 @@ app.post('/updateconfig', (req, res) => {
   }
 });
 
-containerDetails();
-
-server.listen(port, () => {
-  console.log('Listening on port %d', port);
-});
+if (config.ssl && config.ssl_cert && config.ssl_key) {
+  console.log('SSL Server API enabled');
+  const ssl_options = {
+    cert: fs.readFileSync(config.ssl_cert),
+    key: fs.readFileSync(config.ssl_key)
+  };
+  const server = https.createServer(ssl_options, app);
+  server.listen(server_port, () => {
+    console.log('Listening on port %d', server_port);
+  });
+} else {
+  console.log('Non-SSL Server API enabled');
+  const server = http.createServer(app);
+  server.listen(server_port, () => {
+    console.log('Listening on port %d', server_port);
+  });
+}
